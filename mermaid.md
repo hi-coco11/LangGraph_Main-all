@@ -33,11 +33,17 @@ graph TD;
 	search_data_analyze_question(analyze_question)
 	search_data_search_fixed_deposit(search_fixed_deposit)
 	search_data_search_demand_deposit(search_demand_deposit)
+	search_data_search_loan(search_loan)
+	search_data_search_savings(search_savings)
 	search_data_filter_documents(filter_documents)
 	search_data_search_demand_deposit --> search_data_filter_documents;
 	search_data_search_fixed_deposit --> search_data_filter_documents;
+	search_data_search_loan --> search_data_filter_documents;
+	search_data_search_savings --> search_data_filter_documents;
 	search_data_analyze_question -.-> search_data_search_fixed_deposit;
 	search_data_analyze_question -.-> search_data_search_demand_deposit;
+	search_data_analyze_question -.-> search_data_search_loan;
+	search_data_analyze_question -.-> search_data_search_savings;
 	end
 
   classDef first fill:#3b82f6,stroke:#3b82f6,color:#ffffff;

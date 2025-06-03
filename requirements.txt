@@ -12,14 +12,18 @@ langchain-community==0.3.1
 langchain-chroma==0.1.4
 langchain-ollama==0.2.0
 langchain-google-genai==2.0.0
+langchain_huggingface
+langchain_openai
 langchain-groq==0.2.0
+langgraph.checkpoint.memory 
 
 # LLM & Embedding models
 transformers==4.37.2
 tokenizers==0.15.2
 openai==1.70.0
 tiktoken==0.9.0
-langchain-huggingface==0.1.2  # Embedding models
+langchain-huggingface  # Embedding models
+
 
 # Vector store & dependencies
 chromadb==0.5.23
@@ -39,3 +43,7 @@ requests==2.32.3
 
 # Development & Jupyter
 ipykernel==6.29.5
+
+langgraph.graph
+
+gradio

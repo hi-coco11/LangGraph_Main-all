@@ -53,15 +53,15 @@ import gradio as gr
 embeddings_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 # Chroma DB 경로
-CHROMA_DIR = "./../findata/chroma_db"
+CHROMA_DIR = "findata/chroma_db"
 
 # JSON 데이터 경로
-FIXED_JSON_PATH = "./../findata/fixed_deposit_20250212.json"
-DEMAND_JSON_PATH = "./../findata/demand_deposit_20250213.json"
+FIXED_JSON_PATH = "findata/processed_fixed_deposit.json"
+DEMAND_JSON_PATH = "findata/processed_demand_deposit.json"
 
 # DB 이름
-FIXED_COLLECTION = "fixed_deposit_20250212"
-DEMAND_COLLECTION = "demand_deposit_20250213"
+FIXED_COLLECTION = "processed_fixed_deposit"
+DEMAND_COLLECTION = "processed_demand_deposit"
 
 # 정기예금 DB
 fixed_deposit_db = Chroma(

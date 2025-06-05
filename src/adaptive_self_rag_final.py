@@ -1,7 +1,7 @@
 
 """
 Adaptive_self_rag
-금융상품(예: 정기예금, 입출금자유예금) 관련 질의에 대해:
+금융상품 관련 질의에 대해:
 1. 질문 라우팅 → (금융상품 관련이면) 문서 검색 (병렬 서브 그래프) → 문서 평가 → (조건부) 질문 재작성 → 답변 생성
    / (금융상품과 무관하면) LLM fallback을 통해 바로 답변 생성
 그리고 생성된 답변의 품질(환각, 관련성) 평가 후 필요시 재생성 또는 재작성하는 Adaptive Self-RAG 체인.
@@ -738,6 +738,46 @@ def llm_fallback_adaptive(state: SelfRagOverallState) -> dict:
 # ##### 7. [서브 그래프 통합] - 병렬 검색 서브 그래프 구현
 # 
 
+BANK_NORMALIZE = {
+    "국민": "KB국민은행",
+    "국민은행": "KB국민은행",
+    "수협": "Sh수협은행",
+    "수협은행": "Sh수협은행",
+    "신한": "신한은행",
+    "신한은행": "신한은행",
+    "농협": "NH농협은행",
+    "NH": "NH농협은행",
+    "농협은행": "NH농협은행",
+    "우리": "우리은행",
+    "우리은행": "우리은행",
+    "IBK": "IBK기업은행",
+    "기업은행": "IBK기업은행",
+    "IBK기업은행": "IBK기업은행",
+    "하나": "하나은행",
+    "하나은행": "하나은행",
+    "카카오": "카카오뱅크",
+    "카카오뱅크": "카카오뱅크",
+    "부산": "부산은행",
+    "부산은행": "부산은행",
+    }
+
+def get_banks_in_docs(documents: list[Document]) -> set[str]:
+    banks = set()
+    for doc in documents:
+        bank = doc.metadata.get("bank", "")
+        # IBK기업은행, IBK, 기업은행 모두 매칭할 수 있도록 처리 필요시 normalize
+        if bank:
+            banks.add(bank)
+    return banks
+
+def extract_and_normalize_banks(query: str) -> list[str]:
+    found = set()
+    for k in BANK_NORMALIZE:
+        if k in query:
+            found.add(BANK_NORMALIZE[k])
+    return list(found)
+
+
 # %%
 # --- 상태 정의 (검색 서브 그래프 전용) ---
 class SearchState(TypedDict):
@@ -780,26 +820,88 @@ def search_loan_node(state: SearchState):
     return {"documents":docs}
 
 
-def filter_documents_node(state: SearchState):
-    """
-    검색된 문서들에 대해 관련성 평가 후 필터링
-    """
-    print("--- 문서 관련성 평가 (서브 그래프) ---")
-    question = state["question"]
-    documents = state["documents"]
-    
+def filter_documents_subgraph(state: SearchState):
+    # 1. 입력값 준비
+    question = state["question"]                   # 사용자 질문
+    documents = state["documents"]                 # BM25/벡터 등으로 미리 검색된 모든 문서
     filtered_docs = []
+
+    # 2. 모든 검색 문서에 대해 LLM 관련성 평가 (싱글/멀티 모두 동일)
     for d in documents:
         score = retrieval_grader_binary.invoke({
             "question": question,
             "document": d.page_content
         })
         if score.binary_score == "yes":
-            print("--- 문서 관련성: 있음 ---")
             filtered_docs.append(d)
-        else:
-            print("--- 문서 관련성: 없음 ---")
-    return {"filtered_documents": filtered_docs}
+    # => filtered_docs에는 '이 질문에 진짜로 의미 있는 문서'만 남음
+
+    # 3. 질문에서 요구되는 은행명(엔티티) 추출 및 표준화
+    requested_banks = extract_and_normalize_banks(question)
+    # 예) 질문이 "국민은행 예금 추천"이면 ['KB국민은행']
+    #     질문이 "국민, 수협, IBK기업은행 예금 추천"이면 ['KB국민은행', 'Sh수협은행', 'IBK기업은행']
+
+    # 4. 관련성 통과된 문서에 등장한 은행명 집합 추출
+    found_banks = get_banks_in_docs(filtered_docs)
+    # 예) filtered_docs에 국민, 수협 문서만 있으면 found_banks = {'KB국민은행', 'Sh수협은행'}
+
+    # ===================== 싱글/없음 엔티티 분기 =====================
+    if len(requested_banks) <= 1:
+        # [싱글엔티티 or 엔티티 없음]
+        # - 질문에서 은행명이 1개 이하로 추출된 경우
+        # - (1) 관련성 평가만 한 결과(filtered_docs) 반환
+        # - (2) 누락 은행 보완, 재검색 등 추가 로직 "생략"
+        return {"filtered_documents": filtered_docs}
+
+    # ===================== 멀티 엔티티(2개 이상) 분기 =====================
+    # [멀티엔티티] → 커버리지 체크, 누락 보완 로직 진입
+    missing_banks = [b for b in requested_banks if b not in found_banks]
+    # 예) requested_banks = ['KB국민은행', 'Sh수협은행', 'IBK기업은행']
+    #     found_banks = {'KB국민은행', 'Sh수협은행'}
+    #     => missing_banks = ['IBK기업은행']
+
+    PRODUCT_CATEGORIES = ["정기예금", "입출금자유예금", "적금", "대출", "MMDA"]
+
+    # (state에 누락 은행 보완 횟수 관리용 변수 추가)
+    if "missing_bank_retry" not in state:
+        state["missing_bank_retry"] = 0
+
+    # (이미 확보한 은행+카테고리 쌍 관리)
+    covered_pairs = set((doc.metadata.get("bank"), doc.metadata.get("type")) for doc in filtered_docs)
+
+    # ========== (1) 누락 은행 보완 재검색 로직 (최대 2회까지) ==========
+    if missing_banks and state["missing_bank_retry"] < 2:
+        # 누락 은행마다, 각 카테고리별로 추가 검색
+        for bank in missing_banks:
+            for category in PRODUCT_CATEGORIES:
+                if (bank, category) in covered_pairs:
+                    continue  # 이미 확보된 경우 생략
+                more_docs = hybrid_core_search(question, category=category, bank=bank, top_k=2)
+                for d in more_docs:
+                    if (d.metadata.get("bank"), d.metadata.get("type")) in covered_pairs:
+                        continue
+                    # 관련성 평가(batch로 할 수도 있음)
+                    score = retrieval_grader_binary.invoke({
+                        "question": question,
+                        "document": d.page_content
+                    })
+                    if score.binary_score == "yes":
+                        filtered_docs.append(d)
+                        covered_pairs.add((bank, category))
+        state["missing_bank_retry"] += 1
+        # 한 번 더 커버리지 체크 하도록(그래프 반복 등) 상태 반환
+        return {"filtered_documents": filtered_docs, "missing_bank_retry": state["missing_bank_retry"]}
+
+    # ========== (2) 보완 2회 시도 후에도 누락 은행 남을 경우 ==========
+    if missing_banks and state["missing_bank_retry"] >= 2:
+        # 더 이상 보완 안 하고, 지금까지 확보한 문서들 중 상위 3개만 남김 (예시)
+        filtered_docs = filtered_docs[:3]
+        return {"filtered_documents": filtered_docs, "missing_bank_retry": state["missing_bank_retry"]}
+
+    # (모든 은행이 커버됐거나, 보완이 불필요한 경우)
+    return {"filtered_documents": filtered_docs, "missing_bank_retry": state["missing_bank_retry"]}
+
+
 
 def search_web_search_subgraph(state: SearchState):
     """
@@ -891,7 +993,7 @@ search_builder.add_node("search_demand_deposit", search_demand_deposit_node) # �
 search_builder.add_node("search_loan",search_loan_node)
 search_builder.add_node("search_savings",search_savings_node)
 search_builder.add_node("web_search", search_web_search_subgraph)
-search_builder.add_node("filter_documents", filter_documents_node)
+search_builder.add_node("filter_documents", filter_documents_subgraph)
 
 # 엣지 구성
 search_builder.add_edge(START, "analyze_question")
@@ -1005,6 +1107,20 @@ with open("adaptive_self_rag_memory.mmd", "w") as f:
 # else:
 #     print("❌ web_search는 선택되지 않았습니다.")
 
+
+
+### pdf_link 삽입 보조함수
+def postprocess_answer(answer: str, docs: List[Document]) -> str:
+    for doc in docs:
+        pdf = doc.metadata.get("pdf_link")
+        if pdf:
+            if "상품설명서" not in answer:
+                answer += f"\n\n [상품설명서 PDF 보기]({pdf})"
+            break
+    return answer
+
+
+
 # %% [markdown]
 # ##### 9. Gradio Chatbot 구성 및 실행
 # 
@@ -1029,15 +1145,16 @@ class ChatBot:
             state["history"] = history
         
         result = adaptive_self_rag_memory.invoke(state, config=config)
-
         gen_list = result.get("generation", [])
+        docs = result.get("filtered_documents", [])
         if not gen_list:
             bot_response = "죄송합니다. 답변을 생성할 수 없습니다."
         else:
-            bot_response = gen_list[-1]  # 마지막 생성된 답변을 사용
+            raw_answer = gen_list[-1]
+            bot_response = postprocess_answer(raw_answer, docs)
 
         # 대화 이력 업데이트
-        state["history"].append((message, bot_response))
+        #state["history"].append((message, bot_response))  #### 질문/답변이 gradio 화면에서 중복 생성되길래 주석처리 하였습니다.
         print(f"--- History 확인 ---\n{state['history']}")
         return bot_response
 

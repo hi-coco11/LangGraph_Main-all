@@ -82,6 +82,7 @@ for page_num in range(1, 7):
             "최고금리": clean(tds[7].text),
             "전월평균금리": clean(tds[8].text),
             "문의전화": clean(tds[13].text),
+            "pdf_link" : ""
         }
 
         # 상세보기 클릭
@@ -136,6 +137,7 @@ for i in range(0, len(rows), 2):
         "평균금리": clean(tds[11].text),
         "CB회사명": clean(tds[12].text),
         "문의전화": clean(tds[13].text),
+        "pdf_link" : ""
     }
 
     # 상세보기 클릭

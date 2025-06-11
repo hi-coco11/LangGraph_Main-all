@@ -103,6 +103,7 @@ def load_and_prepare_all_documents(json_paths: list[str]) -> list[Document]:
             bank         = entry.get("bank",         md.get("은행"))
             product_name = entry.get("product_name", md.get("상품명"))
             category     = entry.get("type")
+            pdf_link     = entry.get("pdf_link",     md.get("pdf_link"))
             docs.append(
                 Document(
                     page_content=content,
@@ -110,7 +111,8 @@ def load_and_prepare_all_documents(json_paths: list[str]) -> list[Document]:
                         "id":           entry.get("id"),
                         "type":         category,
                         "bank":         bank,
-                        "product_name": product_name
+                        "product_name": product_name,
+                        "pdf_link":     pdf_link
                     }
                 )
             )
@@ -191,10 +193,6 @@ def _search_with_filters(query: str, filters: dict, top_k: int) -> list[Document
         uid = d.metadata["id"]
         if uid not in seen:
             seen.add(uid)
-            # PDF 링크가 있으면 page_content에 추가
-            pdf = d.metadata.get("pdf_link")
-            if pdf and "pdf_link" not in d.page_content:
-                d.page_content += f"\n\n📄 [상품설명서 PDF 보기]({pdf})"
             merged.append(d)
     return merged
 
@@ -1109,14 +1107,17 @@ with open("adaptive_self_rag_memory.mmd", "w") as f:
 
 
 
-### pdf_link 삽입 보조함수
 def postprocess_answer(answer: str, docs: List[Document]) -> str:
+    """
+    관련 문서 중 유효한 pdf_link가 있는 경우, 해당 링크를 답변 말미에 추가.
+    단 한 번만 추가하고 링크가 없는 경우는 아무것도 붙이지 않음.
+    """
     for doc in docs:
-        pdf = doc.metadata.get("pdf_link")
-        if pdf:
-            if "상품설명서" not in answer:
-                answer += f"\n\n [상품설명서 PDF 보기]({pdf})"
-            break
+        pdf_link = doc.metadata.get("pdf_link")
+        if pdf_link and isinstance(pdf_link, str) and pdf_link.strip():
+            if "상품설명서 PDF 보기" not in answer:
+                return f"{answer}\n\n [상품설명서 PDF 보기]({pdf_link})"
+            break  # 한 번만 추가
     return answer
 
 

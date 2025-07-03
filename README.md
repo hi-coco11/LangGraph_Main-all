@@ -30,7 +30,7 @@
 
 다음 다이어그램은 구축된 Adaptive Self-RAG 체인의 전체 프로세스를 나타냅니다:
 
-![Adaptive Self-RAG Graph](./assets/Adaptive_self_rag_diagram.png)
+##### 도식도 추가 예정정
 
 ### 히스토리 기반 개인화
 
@@ -109,7 +109,7 @@ OpenAI의 GPT-4o-mini를 사용하여 답변에 필요한 적절한 문서를 �
 ## 6. 사용자 인터페이스 (Gradio)
 
 * Gradio 기반의 웹 인터페이스 제공
-![챗봇 사용 예시](./assets/AdaptiveSelfRAG_example_screenshot.png)
+##### 인터페이스 추가 예정정
 
 
 ---
